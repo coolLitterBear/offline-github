@@ -1,5 +1,52 @@
 'use strict';
 
+// ---------- 路由引擎 ----------
+function navigate(path, state = {}) {
+  if (location.pathname !== path) {
+    history.pushState(state, '', path);
+  }
+  route();
+}
+
+function route() {
+  const path = location.pathname;
+  const parts = path.split('/').filter(Boolean);
+
+  // 1. / 或 /dashboard
+  if (path === '/' || path === '/dashboard') {
+    showDashboard();
+  }
+  // 2. /users/repos
+  else if (path === '/users/repos') {
+    showRepos();
+  }
+  // 3. /repo/:owner/:name
+  else if (parts[0] === 'repo' && parts.length >= 3) {
+    const slug = `${parts[1]}/${parts[2]}`;
+    const tab = parts[3] || 'code'; 
+    // 支持 ?path=xxx
+    const urlParams = new URLSearchParams(location.search);
+    const pathParam = urlParams.get('path') || '';
+    showRepo(slug, tab, pathParam);
+  }
+  // 4. /issue/:owner/:name/:num
+  else if (parts[0] === 'issue' && parts.length >= 4) {
+    const slug = `${parts[1]}/${parts[2]}`;
+    showIssue(slug, parts[3]);
+  }
+  // 5. /pull/:owner/:name/:num
+  else if (parts[0] === 'pull' && parts.length >= 4) {
+    const slug = `${parts[1]}/${parts[2]}`;
+    showPR(slug, parts[3]);
+  }
+  // 兜底
+  else {
+    showDashboard();
+  }
+}
+
+window.addEventListener('popstate', route);
+
 const $ = s => document.querySelector(s);
 const view = $('#view');
 
@@ -121,7 +168,7 @@ async function showSidebarRepos() {
       </a>
     `).join('');
     $('#sb-repos').querySelectorAll('.sb-repo').forEach(el => {
-      el.onclick = e => { e.preventDefault(); showRepo(el.dataset.slug, 'code'); };
+      el.onclick = e => { e.preventDefault(); navigate(`/repo/${el.dataset.slug}`); };
     });
   } catch {}
 }
@@ -205,11 +252,17 @@ async function showDashboard() {
       </div>
     `;
 
+    // 在 view.innerHTML = ... 后面加上：
+    const allPrs = $('#view-all-prs');
+    if (allPrs) allPrs.onclick = (e) => { e.preventDefault(); navigate('/users/repos'); }; // 暂时指到所有仓库
+    const allIssues = $('#view-all-issues');
+    if (allIssues) allIssues.onclick = (e) => { e.preventDefault(); navigate('/users/repos'); }; 
+
     view.querySelectorAll('.row').forEach(el => {
       el.onclick = () => {
         const repo = el.dataset.repo, num = el.dataset.num;
-        if (el.dataset.kind === 'pr') showPR(repo, num);
-        else showIssue(repo, num);
+        if (el.dataset.kind === 'pr') navigate(`/pull/${repo}/${num}`);
+        else navigate(`/issue/${repo}/${num}`);
       };
     });
   } catch (e) {
@@ -263,7 +316,7 @@ async function showRepo(slug, tab = 'code', path = '') {
   view.querySelectorAll('.repo-tab').forEach(t => {
     t.onclick = e => {
       e.preventDefault();
-      showRepo(slug, t.dataset.tab, '');
+      navigate(`repo/${slug}/${t.dataset.tab}`);
     };
   });
 
@@ -341,14 +394,14 @@ async function renderRepoCode(body, slug, branch, path, htmlUrl) {
     el.onclick = e => {
       if (e.target.closest('a')) return;
       e.preventDefault();
-      showRepo(slug, 'code', el.dataset.path);
+      navigate(`/repo/${slug}/code${p ? '?path=' + encodeURIComponent(p) : ''}`);
     };
   });
 
   body.querySelectorAll('.breadcrumb a').forEach(el => {
     el.onclick = e => {
       e.preventDefault();
-      showRepo(slug, 'code', el.dataset.path || '');
+      navigate(`/repo/${slug}/code${p ? '?path=' + encodeURIComponent(p) : ''}`);
     };
   });
 }

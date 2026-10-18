@@ -1,0 +1,10 @@
+{
+  "reserved": {
+    "users/repos": "showRepos",
+    "settings": "showDashboard",
+    "news": "showDashboard",
+    "notifications": "showDashboard",
+    "explore": "showDashboard",
+    "login": "showDashboard"
+  }
+}

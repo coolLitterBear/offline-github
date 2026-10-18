@@ -1,58 +1,56 @@
 <?php
-// router.php - PHP 内置服务器路由
-// 用法: php -S 127.0.0.1:8080 router.php
-//
-// 只处理 /api/invoke，其余路径返回 false 交给内置服务器托管静态文件。
-
 $uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
 
-// 非 API 路径 → 交给静态文件处理（index.html 等）
-if ($uri !== '/api/invoke') {
-    return false;
-}
+// 1. API 路由
+if ($uri === '/api/invoke') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Access-Control-Allow-Origin: *');
 
-header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
-
-// 只接受 POST
-if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
-    http_response_code(405);
-    echo json_encode(['ok' => false, 'error' => 'method not allowed']);
-    return true;
-}
-
-// 解析请求体
-$raw  = file_get_contents('php://input');
-$body = json_decode($raw, true);
-
-if (!is_array($body) || empty($body['action'])) {
-    http_response_code(400);
-    echo json_encode(['ok' => false, 'error' => 'missing action']);
-    return true;
-}
-
-// 组装 argv: [action, arg1, arg2, ...]
-$args = [(string)$body['action']];
-if (isset($body['args']) && is_array($body['args'])) {
-    foreach ($body['args'] as $a) {
-        if (is_string($a)) $args[] = $a;
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+        http_response_code(405);
+        echo json_encode(['ok' => false, 'error' => 'method not allowed']);
+        return true;
     }
-}
 
-// 调 bash，每个参数 escapeshellarg，杜绝注入
-$cmd = 'bash ' . __DIR__ . '/bridge.sh';
-foreach ($args as $a) {
-    $cmd .= ' ' . escapeshellarg($a);
-}
+    $raw  = file_get_contents('php://input');
+    $body = json_decode($raw, true);
 
-$out = shell_exec($cmd);
+    if (!is_array($body) || empty($body['action'])) {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'error' => 'missing action']);
+        return true;
+    }
 
-if ($out === null || trim($out) === '') {
-    http_response_code(500);
-    echo json_encode(['ok' => false, 'error' => 'empty output from bridge']);
+    $args = [(string)$body['action']];
+    if (isset($body['args']) && is_array($body['args'])) {
+        foreach ($body['args'] as $a) {
+            if (is_string($a)) $args[] = $a;
+        }
+    }
+
+    $cmd = 'bash ' . __DIR__ . '/bridge.sh';
+    foreach ($args as $a) {
+        $cmd .= ' ' . escapeshellarg($a);
+    }
+
+    $out = shell_exec($cmd . ' 2>&1');
+
+    if ($out === null || trim($out) === '') {
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'error' => 'empty output from bridge']);
+        return true;
+    }
+
+    echo $out;
     return true;
 }
 
-// 脚本已输出 {"ok":...}，原样透传
-echo $out;
+// 2. 静态文件直接放行（css/js/图片等）
+if ($uri !== '/' && file_exists(__DIR__ . $uri) && !is_dir(__DIR__ . $uri)) {
+    return false; // 交给 PHP 内置服务器处理
+}
+
+// 3. 其他所有路径（比如 /users/repos 等），全部回退到 index.html
+header('Content-Type: text/html; charset=utf-8');
+readfile(__DIR__ . '/index.html');
 return true;
