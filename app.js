@@ -8,41 +8,75 @@ function navigate(path, state = {}) {
   route();
 }
 
+let routeConfig = { reserved: {} };
+
+async function initRouter() {
+  try {
+    const res = await fetch('/routes.json');
+    routeConfig = await res.json();
+  } catch (e) {
+    console.warn('未找到 routes.json，使用默认路由');
+  }
+  route(); // 数据加载完毕后，开始路由
+}
+
 function route() {
   const path = location.pathname;
   const parts = path.split('/').filter(Boolean);
 
-  // 1. / 或 /dashboard
-  if (path === '/' || path === '/dashboard') {
+  if (parts.length === 0) {
     showDashboard();
+    return;
   }
-  // 2. /users/repos
-  else if (path === '/users/repos') {
-    showRepos();
+
+  const first = parts[0];
+  const currentRouteStr = parts.slice(0, 2).join('/'); 
+
+  // 1. 优先检查是否是保留字（读取 JSON 配置）
+  if (routeConfig.reserved[first] || routeConfig.reserved[currentRouteStr]) {
+    const functionName = routeConfig.reserved[currentRouteStr] || routeConfig.reserved[first];
+    if (typeof window[functionName] === 'function') {
+      window[functionName]();
+    } else {
+      showDashboard(); // 兜底
+    }
+    return;
   }
-  // 3. /repo/:owner/:name
-  else if (parts[0] === 'repo' && parts.length >= 3) {
-    const slug = `${parts[1]}/${parts[2]}`;
-    const tab = parts[3] || 'code'; 
-    // 支持 ?path=xxx
-    const urlParams = new URLSearchParams(location.search);
-    const pathParam = urlParams.get('path') || '';
-    showRepo(slug, tab, pathParam);
+
+  // 2. 动态路由：/:owner/:repo (不是保留字才走这里)
+  if (parts.length >= 2) {
+    const owner = parts[0];
+    const repoName = parts[1];
+    const slug = `${owner}/${repoName}`;
+    
+    // /:owner/:repo
+    if (parts.length === 2) {
+      const urlParams = new URLSearchParams(location.search);
+      showRepo(slug, 'code', urlParams.get('path') || '');
+    }
+    // /:owner/:repo/issues
+    else if (parts[2] === 'issues' && parts.length === 3) {
+      showRepo(slug, 'issues');
+    }
+    // /:owner/:repo/pulls
+    else if (parts[2] === 'pulls' && parts.length === 3) {
+      showRepo(slug, 'pulls');
+    }
+    // /:owner/:repo/issues/:num
+    else if (parts[2] === 'issues' && parts.length === 4) {
+      showIssue(slug, parts[3]);
+    }
+    // /:owner/:repo/pull/:num
+    else if (parts[2] === 'pull' && parts.length === 4) {
+      showPR(slug, parts[3]);
+    }
+    else {
+      showDashboard();
+    }
+    return;
   }
-  // 4. /issue/:owner/:name/:num
-  else if (parts[0] === 'issue' && parts.length >= 4) {
-    const slug = `${parts[1]}/${parts[2]}`;
-    showIssue(slug, parts[3]);
-  }
-  // 5. /pull/:owner/:name/:num
-  else if (parts[0] === 'pull' && parts.length >= 4) {
-    const slug = `${parts[1]}/${parts[2]}`;
-    showPR(slug, parts[3]);
-  }
-  // 兜底
-  else {
-    showDashboard();
-  }
+
+  showDashboard();
 }
 
 window.addEventListener('popstate', route);
@@ -168,7 +202,7 @@ async function showSidebarRepos() {
       </a>
     `).join('');
     $('#sb-repos').querySelectorAll('.sb-repo').forEach(el => {
-      el.onclick = e => { e.preventDefault(); navigate(`/repo/${el.dataset.slug}`); };
+      el.onclick = e => { e.preventDefault(); navigate(`/${el.dataset.slug}`); };
     });
   } catch {}
 }
@@ -261,8 +295,8 @@ async function showDashboard() {
     view.querySelectorAll('.row').forEach(el => {
       el.onclick = () => {
         const repo = el.dataset.repo, num = el.dataset.num;
-        if (el.dataset.kind === 'pr') navigate(`/pull/${repo}/${num}`);
-        else navigate(`/issue/${repo}/${num}`);
+        if (el.dataset.kind === 'pr') navigate(`/${repo}/pull/${num}`);
+        else navigate(`/${repo}/issues/${num}`);
       };
     });
   } catch (e) {
@@ -316,7 +350,7 @@ async function showRepo(slug, tab = 'code', path = '') {
   view.querySelectorAll('.repo-tab').forEach(t => {
     t.onclick = e => {
       e.preventDefault();
-      navigate(`repo/${slug}/${t.dataset.tab}`);
+      navigate(`/${slug}/${t.dataset.tab}`);
     };
   });
 
@@ -394,14 +428,15 @@ async function renderRepoCode(body, slug, branch, path, htmlUrl) {
     el.onclick = e => {
       if (e.target.closest('a')) return;
       e.preventDefault();
-      navigate(`/repo/${slug}/code${p ? '?path=' + encodeURIComponent(p) : ''}`);
+      navigate(`/${slug}?path=${encodeURIComponent(el.dataset.path)}`);
     };
   });
 
   body.querySelectorAll('.breadcrumb a').forEach(el => {
     el.onclick = e => {
       e.preventDefault();
-      navigate(`/repo/${slug}/code${p ? '?path=' + encodeURIComponent(p) : ''}`);
+      const p =el.dataset.path;
+      navigate(`/${slug}/code${p ? '?path=' + encodeURIComponent(p) : ''}`);
     };
   });
 }
@@ -427,7 +462,7 @@ async function renderRepoIssues(body, slug) {
       </div>
     `).join('');
     body.querySelectorAll('.item').forEach(el => {
-      el.onclick = () => showIssue(slug, el.dataset.num);
+      el.onclick = () => navigate(`/${slug}/issues/${el.dataset.num}`);
     });
   } catch (e) {
     body.innerHTML = `<div class="error">${esc(e.message)}</div>`;
@@ -456,7 +491,7 @@ async function renderRepoPulls(body, slug) {
       </div>
     `).join('');
     body.querySelectorAll('.item').forEach(el => {
-      el.onclick = () => showPR(slug, el.dataset.num);
+      el.onclick = () => navigate(`/${slug}/pull/${el.dataset.num}`);
     });
   } catch (e) {
     body.innerHTML = `<div class="error">${esc(e.message)}</div>`;
@@ -491,7 +526,7 @@ async function showIssue(slug, num) {
         `).join('')}
       </div>
     `;
-    $('#back').onclick = e => { e.preventDefault(); showDashboard(); };
+    $('#back').onclick = e => { e.preventDefault(); navigate(`/${slug}/issues`); };
   } catch (e) {
     setError(e.message);
   }
@@ -531,17 +566,18 @@ async function showPR(slug, num) {
         `).join('')}
       </div>
     `;
-    $('#back').onclick = e => { e.preventDefault(); showDashboard(); };
+    $('#back').onclick = e => { e.preventDefault(); navigate(`/${slug}/pulls`); };
   } catch (e) {
     setError(e.message);
   }
 }
 
 // ---------- 启动 ----------
-$('#home-btn').onclick = e => { e.preventDefault(); showDashboard(); };
-$('#avatar-btn').onclick = () => showDashboard();
+// ---------- 启动 ----------
+$('#home-btn').onclick = e => { e.preventDefault(); navigate('/'); };
+$('#avatar-btn').onclick = () => navigate('/');
 
 showUser().then(() => {
   showSidebarRepos();
-  showDashboard();
+  initRouter();
 });
