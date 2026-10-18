@@ -43,6 +43,34 @@ action="${1:-}"
 shift
 
 case "$action" in
+  repo)
+    slug="${1:-}"; [ -n "$slug" ] || fail "usage: repo <owner/name>"
+    out=$(gh api "repos/$slug" 2>&1) || fail "gh api repos/$slug: $out"
+    ok "$out"
+    ;;
+
+  contents)
+    slug="${1:-}"; path="${2:-}"
+    [ -n "$slug" ] || fail "usage: contents <owner/name> [path]"
+    if [ -n "$path" ]; then
+      out=$(gh api "repos/$slug/contents/$path" 2>&1) \
+        || fail "gh api contents: $out"
+    else
+      out=$(gh api "repos/$slug/contents" 2>&1) \
+        || fail "gh api contents: $out"
+    fi
+    ok "$out"
+    ;;
+
+  readme)
+    slug="${1:-}"; [ -n "$slug" ] || fail "usage: readme <owner/name>"
+    if out=$(gh api "repos/$slug/readme" 2>&1); then
+      ok "$out"
+    else
+      # 没有 README 不算错误
+      jq -cn '{ok:true,data:null}'
+    fi
+    ;;
 
   me)
     out=$(gh api /user 2>&1) || fail "gh api /user: $out"
